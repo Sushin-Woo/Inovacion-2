@@ -1,0 +1,28 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+
+# Environment & secrets — NUNCA commitear
+.env
+.env.*
+!.env.example
+
+# Prisma local DB (SQLite en fase de pruebas)
+prisma/*.db
+prisma/*.db-journal
+*.sqlite
+
+# Sesión de WhatsApp (Baileys) — contiene credenciales de la sesión, NO commitear
+wa-session
+wa-session/
+
+# Logs
+*.log
+logs
+
+# OS / editor
+.DS_Store
+.idea
+.vscode

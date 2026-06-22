@@ -1,0 +1,246 @@
+// Modelo de datos — "El maestro del segundo turno"
+// Provider: PostgreSQL (producción). Para pruebas locales sin instalar nada,
+// usa el docker-compose incluido (levanta Postgres). Si prefieres SQLite,
+// cambia provider a "sqlite", DATABASE_URL a "file:./dev.db" y reemplaza los
+// enums por String (SQLite no soporta enums nativos).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------------------------------------------------------
+// ENUMS — máquinas de estado del negocio
+// ----------------------------------------------------------------------------
+
+enum QuoteType {
+  RAPIDA // Cotización rápida: inicia con audio/mensaje del cliente
+  PROYECTO // Mueble a medida: requiere agendar visita a terreno
+}
+
+enum QuoteStatus {
+  RECIBIDA // Llegó el mensaje/audio, sin precio aún
+  EN_REVISION // El maestro la está evaluando
+  VISITA_AGENDADA // Solo PROYECTO: visita a terreno coordinada
+  COTIZADA // Tiene un monto estimado enviado al cliente
+  ACEPTADA // El cliente aceptó → puede convertirse en pedido
+  RECHAZADA
+  EXPIRADA
+}
+
+enum VisitStatus {
+  AGENDADA
+  REALIZADA
+  CANCELADA
+  REAGENDADA
+}
+
+enum OrderStatus {
+  BORRADOR // Pedido creado, esperando anticipo
+  CONFIRMADO // Se registró >= 50% de anticipo
+  EN_PRODUCCION
+  LISTO // Listo para entrega / retiro
+  ENTREGADO
+  CANCELADO
+}
+
+enum PaymentType {
+  ANTICIPO // Abono inicial (regla del 50%)
+  SALDO // Pago del saldo restante
+  AJUSTE // Correcciones manuales
+}
+
+enum PaymentMethod {
+  EFECTIVO
+  TRANSFERENCIA
+  TARJETA
+  OTRO
+}
+
+enum LabelStatus {
+  DISPONIBLE // QR del rollo preimpreso, aún sin emparejar
+  ASIGNADA // Emparejada a un pedido
+  ANULADA
+}
+
+enum MessageDirection {
+  ENTRANTE // Cliente -> sistema (webhook)
+  SALIENTE // Sistema -> cliente
+}
+
+// ----------------------------------------------------------------------------
+// CLIENTE
+// ----------------------------------------------------------------------------
+
+model Customer {
+  id        String   @id @default(cuid())
+  // Número de WhatsApp en formato E.164 (ej: 56912345678). Identificador natural.
+  phone     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  quotes   Quote[]
+  orders   Order[]
+  messages Message[]
+
+  @@map("customers")
+}
+
+// ----------------------------------------------------------------------------
+// COTIZACIÓN — soporta las dos modalidades (RAPIDA / PROYECTO)
+// ----------------------------------------------------------------------------
+
+model Quote {
+  id          String      @id @default(cuid())
+  customer    Customer    @relation(fields: [customerId], references: [id])
+  customerId  String
+  type        QuoteType
+  status      QuoteStatus @default(RECIBIDA)
+  // Texto libre o transcripción. La fuente original (audio) va en audioUrl.
+  description String?
+  audioUrl    String?
+  material    String?
+  // Monto estimado que el maestro define tras revisar.
+  estimatedAmount Decimal? @db.Decimal(12, 2)
+  currency        String   @default("CLP")
+
+  // Solo aplica a PROYECTO (mueble a medida): visita a terreno.
+  siteVisit SiteVisit?
+
+  // Si la cotización se acepta, se materializa en un pedido.
+  order Order?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([status])
+  @@map("quotes")
+}
+
+model SiteVisit {
+  id          String      @id @default(cuid())
+  quote       Quote       @relation(fields: [quoteId], references: [id])
+  quoteId     String      @unique
+  scheduledAt DateTime
+  address     String
+  notes       String?
+  status      VisitStatus @default(AGENDADA)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("site_visits")
+}
+
+// ----------------------------------------------------------------------------
+// PEDIDO — regla del 50% de anticipo para confirmar
+// ----------------------------------------------------------------------------
+
+model Order {
+  id          String      @id @default(cuid())
+  // Identificador legible para el taller (ej: PED-000128). Es lo que se empareja al QR.
+  code        String      @unique
+  customer    Customer    @relation(fields: [customerId], references: [id])
+  customerId  String
+  // Una cotización puede generar a lo más un pedido.
+  quote       Quote?      @relation(fields: [quoteId], references: [id])
+  quoteId     String?     @unique
+  status      OrderStatus @default(BORRADOR)
+
+  totalAmount Decimal @db.Decimal(12, 2)
+  currency    String  @default("CLP")
+  // Mínimo de anticipo exigido para confirmar (por defecto 50% del total).
+  depositRequired Decimal @db.Decimal(12, 2)
+
+  description String?
+  confirmedAt DateTime?
+  deliveredAt DateTime?
+
+  payments Payment[]
+  label    Label? // QR físico emparejado
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+model Payment {
+  id        String        @id @default(cuid())
+  order     Order         @relation(fields: [orderId], references: [id])
+  orderId   String
+  amount    Decimal       @db.Decimal(12, 2)
+  type      PaymentType   @default(ANTICIPO)
+  method    PaymentMethod @default(TRANSFERENCIA)
+  reference String? // comprobante / nº de transferencia
+  paidAt    DateTime      @default(now())
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+  @@index([paidAt])
+  @@map("payments")
+}
+
+// ----------------------------------------------------------------------------
+// ETIQUETAS QR — rollo preimpreso, el sistema SOLO empareja (no imprime)
+// ----------------------------------------------------------------------------
+
+model Label {
+  id String @id @default(cuid())
+  // Código impreso en la etiqueta física del rollo. Único e inmutable.
+  qrCode    String      @unique
+  status    LabelStatus @default(DISPONIBLE)
+  // Pedido al que se emparejó (1:1). Null mientras está DISPONIBLE.
+  order     Order?      @relation(fields: [orderId], references: [id])
+  orderId   String?     @unique
+  assignedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@map("labels")
+}
+
+// ----------------------------------------------------------------------------
+// MENSAJERÍA / AUDITORÍA DE WEBHOOKS
+// ----------------------------------------------------------------------------
+
+// Idempotencia: cada evento entrante de WhatsApp tiene un id único.
+// Guardarlo evita procesar dos veces el mismo webhook (reintentos de Meta).
+model WebhookEvent {
+  id          String   @id @default(cuid())
+  externalId  String   @unique // id del mensaje según WhatsApp
+  payload     Json
+  processedAt DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([processedAt])
+  @@map("webhook_events")
+}
+
+model Message {
+  id         String           @id @default(cuid())
+  customer   Customer?        @relation(fields: [customerId], references: [id])
+  customerId String?
+  direction  MessageDirection
+  // Texto plano ya sanitizado.
+  body       String?
+  mediaUrl   String?
+  externalId String? // id del mensaje en WhatsApp
+  createdAt  DateTime         @default(now())
+
+  @@index([customerId])
+  @@index([createdAt])
+  @@map("messages")
+}

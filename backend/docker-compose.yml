@@ -1,0 +1,44 @@
+# Stack local / VPS: API + PostgreSQL.
+# Local:   docker compose up --build
+# En Contabo: igual, pero pon los secretos en un .env fuera del repo y usa
+# 'env_file'. NO subas el .env al registro de imágenes.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: maestro
+      POSTGRES_PASSWORD: maestro
+      POSTGRES_DB: maestro
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U maestro']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Dentro de la red de compose el host de la DB es 'db', no localhost.
+      DATABASE_URL: 'postgresql://maestro:maestro@db:5432/maestro?schema=public'
+      # Persiste la sesión de Baileys en el volumen (sobrevive a reinicios).
+      WHATSAPP_SESSION_DIR: '/app/wa-session'
+    volumes:
+      - wa_session:/app/wa-session
+    ports:
+      - '3000:3000'
+
+volumes:
+  pgdata:
+  wa_session:

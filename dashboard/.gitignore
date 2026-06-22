@@ -1,0 +1,14 @@
+node_modules
+dist
+dist-ssr
+
+# Entorno y secretos — nunca commitear
+.env
+.env.*
+!.env.example
+
+*.local
+*.log
+.DS_Store
+.vscode/*
+!.vscode/extensions.json

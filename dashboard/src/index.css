@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-madera-100 text-acero-900 antialiased;
+    /* Respeta el notch en móviles. */
+    padding: env(safe-area-inset-top) env(safe-area-inset-right)
+      env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+}
+
+@layer components {
+  /* Botón táctil grande (mobile-first, dedos con guantes / polvo). */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5
+      text-sm font-bold transition active:scale-[0.98] focus:outline-none
+      focus:ring-2 focus:ring-offset-1;
+  }
+  .btn-primary {
+    @apply btn bg-taller-500 text-white hover:bg-taller-600 focus:ring-taller-400;
+  }
+  .btn-steel {
+    @apply btn bg-acero-700 text-white hover:bg-acero-800 focus:ring-acero-400;
+  }
+  .btn-ghost {
+    @apply btn bg-white text-acero-800 ring-1 ring-acero-200 hover:bg-acero-50;
+  }
+}
