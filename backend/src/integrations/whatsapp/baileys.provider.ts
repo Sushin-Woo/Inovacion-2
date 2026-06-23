@@ -36,6 +36,18 @@ function extractText(msg: WAMessage): string | undefined {
   return m.conversation ?? m.extendedTextMessage?.text ?? undefined;
 }
 
+/** Antigüedad del mensaje en segundos (messageTimestamp puede ser number o Long). */
+function ageSeconds(msg: WAMessage): number {
+  const raw = msg.messageTimestamp;
+  const ts = typeof raw === 'number' ? raw : Number(raw?.toNumber?.() ?? raw ?? 0);
+  if (!ts) return 0;
+  return Date.now() / 1000 - ts;
+}
+
+// Solo respondemos a mensajes recientes. Evita contestar el historial que llega
+// como 'append' al reconectar.
+const MAX_AGE_SECONDS = 90;
+
 export async function startBaileys(): Promise<void> {
   const { state, saveCreds } = await useMultiFileAuthState(env.WHATSAPP_SESSION_DIR);
   const { version } = await fetchLatestBaileysVersion();
@@ -83,13 +95,22 @@ export async function startBaileys(): Promise<void> {
   });
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
+    logger.info({ type, count: messages.length }, '🔔 messages.upsert recibido');
+    // Procesamos 'notify' (tiempo real) y 'append' (algunos clientes los entregan
+    // así). El filtro de antigüedad evita responder mensajes viejos del historial.
+    if (type !== 'notify' && type !== 'append') return;
     for (const m of messages) {
       try {
         // Ignora mensajes propios, de grupos y de estados.
         if (!m.message || m.key.fromMe) continue;
         const jid = m.key.remoteJid ?? '';
         if (!jid || jid.endsWith('@g.us') || jid === 'status@broadcast') continue;
+
+        const age = ageSeconds(m);
+        if (age > MAX_AGE_SECONDS) {
+          logger.info({ from: jid, age: Math.round(age) }, 'mensaje antiguo, ignorado');
+          continue;
+        }
 
         const text = extractText(m);
         const isAudio = Boolean(m.message.audioMessage);
@@ -98,6 +119,8 @@ export async function startBaileys(): Promise<void> {
         const norm: NormalizedInboundMessage = {
           externalId: m.key.id ?? `${jid}-${m.messageTimestamp}`,
           phone: jid.split('@')[0],
+          // Responder al JID original (puede ser @lid; no se puede rearmar).
+          chatJid: jid,
           name: m.pushName ?? undefined,
           type: isAudio ? 'audio' : 'text',
           text,

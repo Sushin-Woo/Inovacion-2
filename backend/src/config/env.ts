@@ -9,6 +9,14 @@ import { z } from 'zod';
  * Pensado para inyección segura de secretos (deployment keys / Docker secrets):
  * solo se leen de process.env, nunca se hardcodean.
  */
+
+// En un .env, una variable vacía (FOO=) llega como "" (no undefined), lo que
+// rompe validaciones de formato como .url(). Tratamos "" como "no definida".
+const optionalUrl = z.preprocess(
+  (v) => (v === '' ? undefined : v),
+  z.string().url().optional(),
+);
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -50,7 +58,7 @@ const envSchema = z.object({
   TZ: z.string().default('America/Santiago'),
 
   // --- Adaptador de planillas (Google Forms/Sheets) — opcional ---
-  SHEETS_WEBHOOK_URL: z.string().url().optional(),
+  SHEETS_WEBHOOK_URL: optionalUrl,
   // Token compartido para autenticar la ingesta entrante desde Forms/Sheets.
   SHEETS_INGEST_TOKEN: z.string().optional(),
 }).superRefine((val, ctx) => {

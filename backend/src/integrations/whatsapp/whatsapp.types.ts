@@ -35,6 +35,12 @@ export interface WhatsAppWebhookBody {
 export interface NormalizedInboundMessage {
   externalId: string;
   phone: string;
+  /**
+   * JID completo del chat para RESPONDER, conservando su dominio original
+   * (@s.whatsapp.net o @lid). WhatsApp moderno suele usar @lid, que NO se puede
+   * reconstruir desde los dígitos. Si falta, se usa `phone`.
+   */
+  chatJid?: string;
   name?: string;
   type: string;
   text?: string;
